@@ -1,1 +1,4 @@
-Flask
+gunicorn==20.1.0
+Frasco==2.2.5
+Werkzeug==2.2.3
+
